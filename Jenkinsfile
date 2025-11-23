@@ -2,16 +2,21 @@ pipeline {
     agent any
 
     environment {
-        AWS_REGION = 'ap-south-1'
+        AWS_ACCESS_KEY_ID     = credentials('aws-creds').USR
+        AWS_SECRET_ACCESS_KEY = credentials('aws-creds').PSW
+        AWS_DEFAULT_REGION    = "ap-south-1"  // change if needed
     }
 
     stages {
+        stage('Checkout Code') {
+            steps {
+                git branch: 'main', url: 'https://github.com/PONDURUNARESH/IaC-Automation.git'
+            }
+        }
 
         stage('Terraform Init') {
             steps {
-                withAWS(credentials: 'aws-creds', region: "${AWS_REGION}") {
-                    sh 'terraform init -input=false -upgrade'
-                }
+                sh 'terraform init'
             }
         }
 
@@ -23,41 +28,26 @@ pipeline {
 
         stage('Terraform Plan') {
             steps {
-                withAWS(credentials: 'aws-creds', region: "${AWS_REGION}") {
-                    sh 'terraform plan -input=false -out=tfplan -var-file="terraform.tfvars"'
-                }
+                sh 'terraform plan -out=tfplan'
             }
         }
 
         stage('Terraform Apply') {
-            steps {
-                withAWS(credentials: 'aws-creds', region: "${AWS_REGION}") {
-                    sh 'terraform apply -input=false -auto-approve tfplan'
-                }
+            when {
+                branch 'main'
             }
-        }
-
-        stage('Destroy Approval') {
             steps {
-                input message: "Do you want to destroy the infrastructure?"
-            }
-        }
-
-        stage('Terraform Destroy') {
-            steps {
-                withAWS(credentials: 'aws-creds', region: "${AWS_REGION}") {
-                    sh 'terraform destroy -auto-approve'
-                }
+                sh 'terraform apply -auto-approve tfplan'
             }
         }
     }
 
     post {
         success {
-            echo "✅ Pipeline completed"
+            echo "Terraform deployment completed successfully!"
         }
         failure {
-            echo "❌ Pipeline failed"
+            echo "Terraform pipeline failed. Check logs."
         }
     }
 }
