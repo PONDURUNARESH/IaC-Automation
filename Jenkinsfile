@@ -1,13 +1,19 @@
 pipeline {
     agent any
 
+    environment {
+        // Inject AWS credentials from Jenkins Credential ID = 'aws-cred'
+        AWS_ACCESS_KEY_ID     = credentials('aws-cred')
+        AWS_SECRET_ACCESS_KEY = credentials('aws-cred')
+    }
+
     options {
         timestamps()
     }
 
     triggers {
-        // Poll GitHub every 1 minute to detect new commits
-        pollSCM('*/1 * * * *')
+        // Poll GitHub every 2 minutes
+        pollSCM('H/2 * * * *')
     }
 
     stages {
@@ -20,49 +26,50 @@ pipeline {
 
         stage('Terraform Init') {
             steps {
-                bat """
+                bat '''
                 terraform --version
                 terraform init -upgrade
-                """
+                '''
             }
         }
 
         stage('Terraform Validate') {
             steps {
-                bat "terraform validate"
+                bat 'terraform validate'
             }
         }
 
         stage('Terraform Plan') {
             steps {
-                bat "terraform plan -out=tfplan"
+                bat 'terraform plan -out=tfplan'
             }
         }
 
-        stage('Terraform Apply (Auto)') {
+        stage('Manual Approval - Apply') {
             steps {
-                echo "Auto-applying Terraform changes..."
-                bat "terraform apply -auto-approve tfplan"
+                timeout(time: 15, unit: 'MINUTES') {
+                    input message: "Do you want to APPLY the Terraform changes?", ok: "Yes, Apply"
+                }
             }
         }
 
-        stage('Approval for DESTROY (1 hour)') {
-            when {
-                branch 'main'
-            }
+        stage('Terraform Apply') {
             steps {
-                timeout(time: 1, unit: 'HOURS') {
-                    input message: "Do you want to DESTROY all Terraform resources?", ok: "Yes, Destroy"
+                bat 'terraform apply -auto-approve tfplan'
+            }
+        }
+
+        stage('Manual Approval - Destroy (Optional)') {
+            steps {
+                timeout(time: 20, unit: 'MINUTES') {
+                    input message: "Do you want to DESTROY all Terraform infrastructure?", ok: "Destroy Now"
                 }
             }
         }
 
         stage('Terraform Destroy') {
-            when {
-                branch 'main'
-            }
             steps {
-                bat "terraform destroy -auto-approve"
+                bat 'terraform destroy -auto-approve'
             }
         }
     }
@@ -73,3 +80,5 @@ pipeline {
         }
     }
 }
+
+
