@@ -14,11 +14,23 @@ pipeline {
 
     stage('Checkout') {
       steps {
-        // Simple checkout for public GitHub repo
         checkout([$class: 'GitSCM',
           branches: [[name: '*/main']],
           userRemoteConfigs: [[url: 'https://github.com/PONDURUNARESH/IaC-Automation.git']]
         ])
+      }
+    }
+
+    stage('Setup AWS Credentials') {
+      steps {
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-creds'
+        ]]) {
+          bat """
+          echo AWS Credentials Loaded
+          """
+        }
       }
     }
 
@@ -31,7 +43,12 @@ pipeline {
 
     stage('Terraform Init') {
       steps {
-        bat 'terraform init -input=false'
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-creds'
+        ]]) {
+          bat 'terraform init -input=false'
+        }
       }
     }
 
@@ -43,8 +60,13 @@ pipeline {
 
     stage('Terraform Plan') {
       steps {
-        bat 'terraform plan -out=tfplan -input=false'
-        bat 'terraform show -no-color tfplan > plan.txt'
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-creds'
+        ]]) {
+          bat 'terraform plan -out=tfplan -input=false'
+          bat 'terraform show -no-color tfplan > plan.txt'
+        }
         archiveArtifacts artifacts: 'plan.txt', fingerprint: true
       }
     }
@@ -54,7 +76,12 @@ pipeline {
         branch 'main'
       }
       steps {
-        bat 'terraform apply -input=false -auto-approve tfplan'
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-creds'
+        ]]) {
+          bat 'terraform apply -input=false -auto-approve tfplan'
+        }
       }
     }
   }
