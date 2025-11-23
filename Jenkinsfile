@@ -1,97 +1,82 @@
 pipeline {
-  agent any
+    agent any
 
-  environment {
-    AWS_DEFAULT_REGION = "ap-south-1"
-  }
-
-  options {
-    buildDiscarder(logRotator(numToKeepStr: '20'))
-    timestamps()
-  }
-
-  stages {
-
-    stage('Checkout') {
-      steps {
-        checkout([$class: 'GitSCM',
-          branches: [[name: '*/main']],
-          userRemoteConfigs: [[url: 'https://github.com/PONDURUNARESH/IaC-Automation.git']]
-        ])
-      }
+    environment {
+        // Inject AWS credentials from Jenkins Credential ID = 'aws-cred'
+        AWS_ACCESS_KEY_ID     = credentials('aws-cred')
+        AWS_SECRET_ACCESS_KEY = credentials('aws-cred')
     }
 
-    stage('Setup AWS Credentials') {
-      steps {
-        withCredentials([[
-          $class: 'AmazonWebServicesCredentialsBinding',
-          credentialsId: 'aws-cred'
-        ]]) {
-          bat """
-          echo AWS Credentials Loaded
-          """
+    options {
+        timestamps()
+    }
+
+    triggers {
+        // Poll GitHub every 2 minutes
+        pollSCM('H/2 * * * *')
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/PONDURUNARESH/IaC-Automation.git'
+            }
         }
-      }
-    }
 
-    stage('Prepare') {
-      steps {
-        bat 'terraform --version'
-        bat 'git --version'
-      }
-    }
-
-    stage('Terraform Init') {
-      steps {
-        withCredentials([[
-          $class: 'AmazonWebServicesCredentialsBinding',
-          credentialsId: 'aws-cred'
-        ]]) {
-          bat "terraform init -input=false -upgrade"
+        stage('Terraform Init') {
+            steps {
+                bat '''
+                terraform --version
+                terraform init -upgrade
+                '''
+            }
         }
-      }
-    }
 
-    stage('Terraform Validate') {
-      steps {
-        bat 'terraform validate'
-      }
-    }
-
-    stage('Terraform Plan') {
-      steps {
-        withCredentials([[
-          $class: 'AmazonWebServicesCredentialsBinding',
-          credentialsId: 'aws-cred'
-        ]]) {
-          bat 'terraform plan -out=tfplan -input=false'
-          bat 'terraform show -no-color tfplan > plan.txt'
+        stage('Terraform Validate') {
+            steps {
+                bat 'terraform validate'
+            }
         }
-        archiveArtifacts artifacts: 'plan.txt', fingerprint: true
-      }
-    }
 
-    stage('Terraform Apply (Auto)') {
-      when {
-        branch 'main'
-      }
-      steps {
-        withCredentials([[
-          $class: 'AmazonWebServicesCredentialsBinding',
-          credentialsId: 'aws-cred'
-        ]]) {
-          bat 'terraform apply -input=false -auto-approve tfplan'
+        stage('Terraform Plan') {
+            steps {
+                bat 'terraform plan -out=tfplan'
+            }
         }
-      }
-    }
-  }
 
-  post {
-    success {
-      echo "Pipeline completed successfully!"
+        stage('Manual Approval - Apply') {
+            steps {
+                timeout(time: 15, unit: 'MINUTES') {
+                    input message: "Do you want to APPLY the Terraform changes?", ok: "Yes, Apply"
+                }
+            }
+        }
+
+        stage('Terraform Apply') {
+            steps {
+                bat 'terraform apply -auto-approve tfplan'
+            }
+        }
+
+        stage('Manual Approval - Destroy (Optional)') {
+            steps {
+                timeout(time: 20, unit: 'MINUTES') {
+                    input message: "Do you want to DESTROY all Terraform infrastructure?", ok: "Destroy Now"
+                }
+            }
+        }
+
+        stage('Terraform Destroy') {
+            steps {
+                bat 'terraform destroy -auto-approve'
+            }
+        }
     }
-    failure {
-      echo "Pipeline failed. Check console logs."
+
+    post {
+        always {
+            cleanWs()
+        }
     }
-  }
 }
