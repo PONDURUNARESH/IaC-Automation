@@ -5,11 +5,11 @@ pipeline {
     AWS_DEFAULT_REGION = "ap-south-1"   // change as needed
   }
 
-  options {
-    ansiColor('xterm')
+ options {
     buildDiscarder(logRotator(numToKeepStr: '20'))
     timestamps()
-  }
+}
+
 
   stages {
     stage('Checkout') {
