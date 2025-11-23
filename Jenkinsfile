@@ -47,7 +47,7 @@ pipeline {
           $class: 'AmazonWebServicesCredentialsBinding',
           credentialsId: 'aws-cred'
         ]]) {
-          bat 'terraform init -input=false'
+          bat "terraform init -input=false -upgrade"
         }
       }
     }
