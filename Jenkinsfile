@@ -3,8 +3,8 @@ pipeline {
 
     environment {
         // Inject AWS credentials from Jenkins Credential ID = 'aws-cred'
-        AWS_ACCESS_KEY_ID     = credentials('aws-cred')
-        AWS_SECRET_ACCESS_KEY = credentials('aws-cred')
+        AWS_ACCESS_KEY_ID     = credentials('aws-terraform')
+        AWS_SECRET_ACCESS_KEY = credentials('aws-terraform')
     }
 
     options {
