@@ -66,6 +66,11 @@ pipeline {
                 }
             }
         }
+        stage('Archive PEM Key') {
+            steps {
+                archiveArtifacts artifacts: '*.pem', fingerprint: true
+            }
+        }
 
         stage('Manual Approval - Destroy (Optional)') {
             steps {
@@ -87,11 +92,7 @@ pipeline {
             }
         }
 
-        stage('Archive PEM Key') {
-            steps {
-                archiveArtifacts artifacts: '*.pem', fingerprint: true
-            }
-        }
+        
     }
 
     post {
