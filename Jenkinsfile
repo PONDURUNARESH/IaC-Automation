@@ -1,9 +1,7 @@
 pipeline {
     agent any
 
-    options {
-        timestamps()
-    }
+    options { timestamps() }
 
     triggers {
         pollSCM('H/2 * * * *')
@@ -20,10 +18,15 @@ pipeline {
 
         stage('Terraform Init') {
             steps {
-                bat '''
-                terraform --version
-                terraform init -upgrade
-                '''
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-terraform'
+                ]]) {
+                    bat '''
+                    terraform --version
+                    terraform init -upgrade
+                    '''
+                }
             }
         }
 
@@ -35,7 +38,12 @@ pipeline {
 
         stage('Terraform Plan') {
             steps {
-                bat 'terraform plan -out=tfplan'
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-terraform'
+                ]]) {
+                    bat 'terraform plan -out=tfplan'
+                }
             }
         }
 
@@ -87,12 +95,12 @@ pipeline {
     }
 
     post {
-        success {
-            echo '✅ Infrastructure provisioned successfully!'
-        }
-
         failure {
             echo '❌ Pipeline failed. Check Terraform logs.'
+        }
+
+        success {
+            echo '✅ Terraform executed successfully!'
         }
 
         always {
