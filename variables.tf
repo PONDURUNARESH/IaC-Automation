@@ -4,11 +4,17 @@ variable "vpc_cidr" {
 }
 
 variable "public_subnets" {
-  description = "Subnets CIDR"
+  description = "Public Subnet CIDRs"
   type        = list(string)
 }
 
 variable "instance_type" {
-  description = "Instance Type"
+  description = "EC2 Instance Type"
   type        = string
+}
+
+variable "key_name" {
+  description = "EC2 Key Pair Name"
+  type        = string
+  default     = "windowskey"
 }
