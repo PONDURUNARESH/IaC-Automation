@@ -66,6 +66,8 @@ pipeline {
                 }
             }
         }
+
+        // ✅ IMPORTANT: Archive PEM AFTER Apply
         stage('Archive PEM Key') {
             steps {
                 archiveArtifacts artifacts: '*.pem', fingerprint: true
@@ -91,8 +93,6 @@ pipeline {
                 }
             }
         }
-
-        
     }
 
     post {
@@ -105,7 +105,6 @@ pipeline {
         }
 
         always {
-            archiveArtifacts artifacts: '*.pem', fingerprint: true
             cleanWs()
         }
     }
