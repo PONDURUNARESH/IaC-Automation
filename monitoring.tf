@@ -1,6 +1,12 @@
-# -------------------------
-# Security Group for Monitoring
-# -------------------------
+# =============================================================================
+# monitoring.tf
+#
+# Strategy: instead of templatefile() (which clashes with bash ${} syntax),
+# we write a tiny wrapper inline in user_data that exports Terraform
+# values as env vars, embeds monitoring-install.sh verbatim, then runs it.
+# =============================================================================
+
+# ── Security Group for Monitoring Server ──────────────────────────────────────
 module "monitoring_sg" {
   source = "terraform-aws-modules/security-group/aws"
 
@@ -24,13 +30,6 @@ module "monitoring_sg" {
       cidr_blocks = "0.0.0.0/0"
     },
     {
-      from_port   = 9100
-      to_port     = 9100
-      protocol    = "tcp"
-      description = "Node Exporter (from within VPC only)"
-      cidr_blocks = var.vpc_cidr
-    },
-    {
       from_port   = 9093
       to_port     = 9093
       protocol    = "tcp"
@@ -38,10 +37,17 @@ module "monitoring_sg" {
       cidr_blocks = "0.0.0.0/0"
     },
     {
+      from_port   = 9100
+      to_port     = 9100
+      protocol    = "tcp"
+      description = "Node Exporter - internal VPC only"
+      cidr_blocks = var.vpc_cidr
+    },
+    {
       from_port   = 22
       to_port     = 22
       protocol    = "tcp"
-      description = "SSH Access"
+      description = "SSH"
       cidr_blocks = "0.0.0.0/0"
     }
   ]
@@ -62,9 +68,11 @@ module "monitoring_sg" {
   }
 }
 
-# -------------------------
-# Monitoring EC2 Instance
-# -------------------------
+# ── Monitoring EC2 Instance ───────────────────────────────────────────────────
+# user_data approach (no templatefile):
+#   1. Export Terraform-resolved values as env vars
+#   2. Embed monitoring-install.sh verbatim using file()
+#   3. Run the install script — it reads the env vars
 module "monitoring_instance" {
   source = "terraform-aws-modules/ec2-instance/aws"
 
@@ -77,11 +85,15 @@ module "monitoring_instance" {
   vpc_security_group_ids      = [module.monitoring_sg.security_group_id]
   subnet_id                   = module.vpc.public_subnets[0]
   associate_public_ip_address = true
-  user_data                   = templatefile("scripts/monitoring-install.sh", {
-    jenkins_private_ip = module.ec2_instance.private_ip
-    vpc_cidr           = var.vpc_cidr
-    aws_region         = var.aws_region
-  })
+
+  user_data = join("\n", [
+    "#!/bin/bash",
+    "# Terraform-injected environment variables",
+    "export JENKINS_IP='${module.ec2_instance.private_ip}'",
+    "export GRAFANA_PASS='${var.grafana_admin_password}'",
+    "# monitoring-install.sh (embedded verbatim - no templatefile clash)",
+    file("${path.module}/scripts/monitoring-install.sh")
+  ])
 
   depends_on = [module.ec2_instance]
 
@@ -93,10 +105,7 @@ module "monitoring_instance" {
   }
 }
 
-# -------------------------
-# Allow Jenkins EC2 to be scraped by Prometheus
-# Adds port 9100 ingress to existing Jenkins SG
-# -------------------------
+# ── Allow Prometheus to scrape Node Exporter on the Jenkins server ─────────────
 resource "aws_security_group_rule" "jenkins_node_exporter" {
   type                     = "ingress"
   from_port                = 9100
@@ -104,5 +113,5 @@ resource "aws_security_group_rule" "jenkins_node_exporter" {
   protocol                 = "tcp"
   source_security_group_id = module.monitoring_sg.security_group_id
   security_group_id        = module.sg.security_group_id
-  description              = "Allow Prometheus to scrape Node Exporter on Jenkins"
+  description              = "Allow Prometheus (monitoring-sg) to scrape Jenkins Node Exporter"
 }
