@@ -1,9 +1,10 @@
 # =============================================================================
 # monitoring.tf
 #
-# Strategy: instead of templatefile() (which clashes with bash ${} syntax),
-# we write a tiny wrapper inline in user_data that exports Terraform
-# values as env vars, embeds monitoring-install.sh verbatim, then runs it.
+# user_data strategy:
+#   - Write monitoring-install.sh to the instance via a base64-encoded
+#     write_files cloud-init block, then run it with env vars exported.
+#   - This completely avoids any heredoc / shebang collision.
 # =============================================================================
 
 # ── Security Group for Monitoring Server ──────────────────────────────────────
@@ -69,10 +70,14 @@ module "monitoring_sg" {
 }
 
 # ── Monitoring EC2 Instance ───────────────────────────────────────────────────
-# user_data approach (no templatefile):
-#   1. Export Terraform-resolved values as env vars
-#   2. Embed monitoring-install.sh verbatim using file()
-#   3. Run the install script — it reads the env vars
+# user_data:
+#   1. Export JENKINS_IP and GRAFANA_PASS as env vars (Terraform resolves these)
+#   2. Decode and write monitoring-install.sh from base64 (no heredoc clash)
+#   3. Run it
+locals {
+  install_script_b64 = base64encode(file("${path.module}/scripts/monitoring-install.sh"))
+}
+
 module "monitoring_instance" {
   source = "terraform-aws-modules/ec2-instance/aws"
 
@@ -86,14 +91,26 @@ module "monitoring_instance" {
   subnet_id                   = module.vpc.public_subnets[0]
   associate_public_ip_address = true
 
-  user_data = join("\n", [
-    "#!/bin/bash",
-    "# Terraform-injected environment variables",
-    "export JENKINS_IP='${module.ec2_instance.private_ip}'",
-    "export GRAFANA_PASS='${var.grafana_admin_password}'",
-    "# monitoring-install.sh (embedded verbatim - no templatefile clash)",
-    file("${path.module}/scripts/monitoring-install.sh")
-  ])
+  user_data = <<-USERDATA
+    #!/bin/bash
+    set -euo pipefail
+    exec >> /var/log/userdata-bootstrap.log 2>&1
+    echo "[$(date)] Bootstrap starting..."
+
+    # Terraform-injected values
+    export JENKINS_IP="${module.ec2_instance.private_ip}"
+    export GRAFANA_PASS="${var.grafana_admin_password}"
+
+    echo "[$(date)] JENKINS_IP=$JENKINS_IP"
+
+    # Decode and write the install script (base64 avoids any heredoc collisions)
+    echo "${local.install_script_b64}" | base64 -d > /tmp/monitoring-install.sh
+    chmod +x /tmp/monitoring-install.sh
+
+    echo "[$(date)] Running monitoring-install.sh..."
+    bash /tmp/monitoring-install.sh
+    echo "[$(date)] Bootstrap complete."
+  USERDATA
 
   depends_on = [module.ec2_instance]
 

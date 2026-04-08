@@ -67,14 +67,16 @@ pipeline {
             }
         }
 
-        // ✅ IMPORTANT: Archive PEM AFTER Apply
         stage('Archive PEM Key') {
             steps {
                 archiveArtifacts artifacts: '*.pem', fingerprint: true
             }
         }
 
-        // ── NEW: Verify Monitoring Stack is healthy after every deploy ────────
+        // ── Verify Monitoring Stack ───────────────────────────────────────────
+        // user_data installs Prometheus + Grafana which takes 8-12 min on a
+        // fresh Amazon Linux 2 instance (yum update + binary downloads).
+        // We poll for up to 15 minutes (90 attempts x 10s).
         stage('Verify Monitoring Stack') {
             steps {
                 withCredentials([[
@@ -82,42 +84,53 @@ pipeline {
                     credentialsId: 'aws-terraform'
                 ]]) {
                     script {
-                        // Capture monitoring IP from Terraform output
                         def monitoringIp = bat(
                             script: 'terraform output -raw monitoring_public_ip',
                             returnStdout: true
                         ).trim().readLines().last()
 
                         echo "Monitoring server IP: ${monitoringIp}"
+                        echo "Waiting up to 15 minutes for Prometheus and Grafana to start..."
 
-                        // Wait up to 3 minutes for services to start (user_data takes time)
-                        def maxRetries = 18
-                        def retryDelay = 10
-                        def prometheusReady = false
-                        def grafanaReady    = false
+                        def maxRetries  = 90   // 90 x 10s = 15 minutes
+                        def retryDelay  = 10
+                        def prometheusOk = false
+                        def grafanaOk    = false
 
                         for (int i = 1; i <= maxRetries; i++) {
-                            echo "Health check attempt ${i}/${maxRetries}..."
-                            try {
-                                bat "curl -sf http://${monitoringIp}:9090/-/healthy > nul 2>&1"
-                                prometheusReady = true
-                            } catch (e) { /* not yet */ }
+                            echo "Health check ${i}/${maxRetries} — elapsed ~${(i-1)*retryDelay}s"
 
-                            try {
-                                bat "curl -sf http://${monitoringIp}:3000/api/health > nul 2>&1"
-                                grafanaReady = true
-                            } catch (e) { /* not yet */ }
+                            if (!prometheusOk) {
+                                def rc = bat(
+                                    script: "curl -sf --connect-timeout 5 http://${monitoringIp}:9090/-/healthy > nul 2>&1",
+                                    returnStatus: true
+                                )
+                                prometheusOk = (rc == 0)
+                                if (prometheusOk) echo "✅ Prometheus is UP"
+                            }
 
-                            if (prometheusReady && grafanaReady) break
+                            if (!grafanaOk) {
+                                def rc = bat(
+                                    script: "curl -sf --connect-timeout 5 http://${monitoringIp}:3000/api/health > nul 2>&1",
+                                    returnStatus: true
+                                )
+                                grafanaOk = (rc == 0)
+                                if (grafanaOk) echo "✅ Grafana is UP"
+                            }
+
+                            if (prometheusOk && grafanaOk) {
+                                echo "✅ All monitoring services are healthy!"
+                                echo "   Prometheus   → http://${monitoringIp}:9090"
+                                echo "   Grafana      → http://${monitoringIp}:3000"
+                                echo "   Alertmanager → http://${monitoringIp}:9093"
+                                break
+                            }
+
                             if (i < maxRetries) sleep(retryDelay)
                         }
 
-                        if (!prometheusReady) error("❌ Prometheus did not become healthy at http://${monitoringIp}:9090")
-                        if (!grafanaReady)    error("❌ Grafana did not become healthy at http://${monitoringIp}:3000")
-
-                        echo "✅ Prometheus healthy → http://${monitoringIp}:9090"
-                        echo "✅ Grafana healthy    → http://${monitoringIp}:3000"
-                        echo "✅ Alertmanager       → http://${monitoringIp}:9093"
+                        if (!prometheusOk) error("❌ Prometheus did not become healthy at http://${monitoringIp}:9090 within 15 minutes.\nSSH in and check: cat /var/log/monitoring-install.log")
+                        if (!grafanaOk)    error("❌ Grafana did not become healthy at http://${monitoringIp}:3000 within 15 minutes.\nSSH in and check: sudo journalctl -u grafana-server -n 50")
                     }
                 }
             }
@@ -149,11 +162,9 @@ pipeline {
         failure {
             echo '❌ Pipeline failed. Check Terraform logs.'
         }
-
         success {
             echo '✅ Terraform executed successfully!'
         }
-
         always {
             cleanWs()
         }
