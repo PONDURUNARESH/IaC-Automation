@@ -139,7 +139,7 @@ pipeline {
 
         stage('Manual Approval - Destroy (Optional)') {
             steps {
-                timeout(time: 20, unit: 'MINUTES') {
+                timeout(time: 60, unit: 'MINUTES') {
                     input message: "Do you want to DESTROY all Terraform infrastructure?",
                           ok: "Destroy Now"
                 }
